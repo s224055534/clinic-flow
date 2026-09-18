@@ -1,0 +1,188 @@
+/* Establish the dashboard typography and page colors */
+:root {
+  font-family: Inter, system-ui, sans-serif;
+  color: #183153;
+  background: #eef4f7;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+}
+button, input, select {
+  font: inherit;
+}
+button {
+  cursor: pointer;
+}
+.shell {
+  width: min(1180px, 94vw);
+  margin: 0 auto;
+  padding: 32px 0 64px;
+}
+.hero {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  align-items: end;
+  margin-bottom: 16px;
+}
+h1, h2, p {
+  margin-top: 0;
+}
+h1 {
+  margin-bottom: 8px;
+  font-size: clamp(2rem, 5vw, 3.5rem);
+}
+h2 {
+  font-size: 1.15rem;
+}
+.eyebrow {
+  color: #147d75;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.notice {
+  padding: 12px 16px;
+  color: #744b00;
+  background: #fff1c9;
+  border-radius: 10px;
+}
+.message {
+  padding: 12px 16px;
+  background: #daf4e7;
+  border-left: 4px solid #147d75;
+}
+/* Group related controls and schedule information into cards */
+.card {
+  background: white;
+  border: 1px solid #d9e3e8;
+  border-radius: 14px;
+  padding: 18px;
+  box-shadow: 0 8px 24px rgba(24, 49, 83, 0.07);
+  margin-bottom: 18px;
+}
+.toolbar, .two-column, .form-grid, .metrics {
+  display: grid;
+  gap: 16px;
+}
+.toolbar, .two-column {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.form-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.metrics {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-bottom: 18px;
+}
+.metrics .card {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+}
+.metrics strong {
+  font-size: 2rem;
+  color: #147d75;
+}
+label {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 12px;
+  font-weight: 700;
+}
+input, select {
+  width: 100%;
+  border: 1px solid #b7c7d1;
+  border-radius: 8px;
+  padding: 10px;
+  background: white;
+}
+.role-picker {
+  min-width: 190px;
+}
+.primary {
+  background: #147d75;
+  color: white;
+  border-color: #147d75;
+}
+.danger {
+  color: #a32222;
+  border-color: #e7b4b4;
+}
+button {
+  border: 1px solid #b7c7d1;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #f7fafb;
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+/* Keep tables and records readable across desktop and mobile widths */
+.table-wrap {
+  overflow-x: auto;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+th, td {
+  padding: 11px 8px;
+  border-bottom: 1px solid #e1e8ec;
+  text-align: left;
+  vertical-align: top;
+}
+td small {
+  display: block;
+  color: #607584;
+  margin-top: 4px;
+}
+.badge {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: #e8eef2;
+  white-space: nowrap;
+}
+.badge.arrived {
+  background: #fff1c9;
+}
+.badge.in-consultation {
+  background: #d9ebff;
+}
+.badge.completed {
+  background: #daf4e7;
+}
+.badge.cancelled {
+  background: #f7dede;
+}
+.patient-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.patient-list article {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  background: #f7fafb;
+  border-radius: 10px;
+}
+@media (max-width: 760px) {
+  .hero {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .toolbar,
+  .two-column,
+  .form-grid,
+  .metrics,
+  .patient-list {
+    grid-template-columns: 1fr;
+  }
+}
