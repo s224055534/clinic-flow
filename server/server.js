@@ -8,6 +8,8 @@ const { Pool } = pg;
 const app = express();
 const pool = new Pool();
 const port = Number(process.env.PORT ?? 3000);
+const receptionistStatuses = ['Scheduled', 'Arrived', 'Cancelled'];
+const clinicianStatuses = ['In Consultation', 'Completed'];
 
 app.use(express.json());
 
@@ -174,6 +176,76 @@ app.post('/api/appointments', allowRoles('Receptionist'), asyncRoute(async (req,
 
   res.status(201).json(result.rows[0]);
 }));
+
+app.patch(
+  '/api/appointments/:id/status',
+  allowRoles('Receptionist', 'Clinician'),
+  asyncRoute(async (req, res) => {
+    const role = req.get('x-demo-role');
+    const status = String(req.body.status ?? '');
+    const allowedStatuses = role === 'Receptionist'
+      ? receptionistStatuses
+      : clinicianStatuses;
+
+    if (!allowedStatuses.includes(status)) {
+      return res.status(403).json({ error: `${role} cannot set status to ${status}.` });
+    }
+
+    const result = await pool.query(
+      `UPDATE appointments
+       SET status = $1
+       WHERE id = $2
+       RETURNING id`,
+      [status, Number(req.params.id)],
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({ error: 'Appointment not found.' });
+    }
+
+    res.json(result.rows[0]);
+  }),
+);
+
+app.patch(
+  '/api/appointments/:id/reschedule',
+  allowRoles('Receptionist'),
+  asyncRoute(async (req, res) => {
+    const appointmentId = Number(req.params.id);
+    const staffId = Number(req.body.staffId);
+    const startsAt = String(req.body.startsAt ?? '');
+    const endsAt = String(req.body.endsAt ?? '');
+
+    if (!appointmentId || !staffId || !validWindow(startsAt, endsAt)) {
+      return res.status(400).json({ error: 'Choose a valid clinician and time range.' });
+    }
+
+    const overlap = await findOverlap(staffId, startsAt, endsAt, appointmentId);
+    if (overlap.rows.length) {
+      return res.status(409).json({ error: 'That clinician already has an overlapping appointment.' });
+    }
+        try {
+      const result = await pool.query(
+        `UPDATE appointments
+         SET staff_id = $1,
+             starts_at = $2,
+             ends_at = $3,
+             status = 'Scheduled'
+         WHERE id = $4
+         RETURNING id`,
+        [staffId, startsAt, endsAt, appointmentId],
+      );
+
+      if (!result.rows.length) {
+        return res.status(404).json({ error: 'Appointment not found.' });
+      }
+
+      res.json(result.rows[0]);
+    } catch {
+      res.status(409).json({ error: 'The database rejected that overlapping time range.' });
+    }
+  }),
+);
 
 app.use((error, _req, res, _next) => {
   console.error(error);

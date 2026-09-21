@@ -96,36 +96,30 @@ export default function App() {
   }
 
   async function updateStatus(id, status) {
-    setData((current) => ({
-      ...current,
-      appointments: current.appointments.map((item) =>
-        item.id === id ? { ...item, status } : item,
-      ),
-    }));
-    refresh(`Appointment marked ${status}.`);
+    try {
+      await request(`/api/appointments/${id}/status`, {
+        method: "PATCH",
+        body: JSON.stringify({ status }),
+      });
+      refresh(`Appointment marked ${status}.`);
+    } catch (error) {
+      setMessage(error.message);
+    }
   }
 
   async function submitReschedule(event) {
     event.preventDefault();
-    setData((current) => ({
-      ...current,
-      appointments: current.appointments.map((item) =>
-        item.id === reschedule.id
-          ? {
-              ...item,
-              ...reschedule,
-              startTime: reschedule.startsAt.slice(11),
-              endTime: reschedule.endsAt.slice(11),
-              staffName: current.staff.find(
-                (staff) => String(staff.id) === reschedule.staffId,
-              ).fullName,
-              status: "Scheduled",
-            }
-          : item,
-      ),
-    }));
-    setReschedule(null);
-    refresh("Appointment rescheduled.");
+    try {
+      await request(`/api/appointments/${reschedule.id}/reschedule`, {
+        method: "PATCH",
+        body: JSON.stringify(reschedule),
+        "x-demo-role": role,
+      });
+      setReschedule(null);
+      refresh("Appointment rescheduled.");
+    } catch (error) {
+      setMessage(error.message);
+    }
   }
 
   // Derive the visible patient list and daily summary counts
@@ -170,6 +164,7 @@ export default function App() {
           </select>
         </label>
       </header>
+
       <p className="notice">
         This learning prototype is not production authentication and must not
         contain real patient data.
