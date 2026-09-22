@@ -123,6 +123,61 @@ button {
   flex-wrap: wrap;
   gap: 6px;
 }
+.section-heading,
+.timeline-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: start;
+}
+.section-heading p,
+.timeline-heading p {
+  margin-bottom: 0;
+}
+.timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.timeline > li {
+  position: relative;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 12px;
+  padding: 0 0 20px;
+}
+.timeline > li:not(:last-child)::before {
+  position: absolute;
+  top: 16px;
+  bottom: 0;
+  left: 8px;
+  width: 2px;
+  content: "";
+  background: #d9e3e8;
+}
+.timeline-marker {
+  width: 12px;
+  height: 12px;
+  margin-top: 4px;
+  border: 3px solid #147d75;
+  border-radius: 50%;
+  background: white;
+  z-index: 1;
+}
+.timeline article {
+  padding: 14px;
+  border-radius: 10px;
+  background: #f7fafb;
+}
+.timeline time,
+.timeline article > p {
+  color: #607584;
+  font-size: 0.9rem;
+}
+.timeline-summary {
+  margin: 12px 0 0;
+  overflow-wrap: anywhere;
+}
 /* Keep tables and records readable across desktop and mobile widths */
 .table-wrap {
   overflow-x: auto;
@@ -184,5 +239,10 @@ td small {
   .metrics,
   .patient-list {
     grid-template-columns: 1fr;
+  }
+  .section-heading,
+  .timeline-heading {
+    align-items: stretch;
+    flex-direction: column;
   }
 }

@@ -1,17 +1,31 @@
 import { loadEnvFile } from "node:process";
+import { createServer } from "node:http";
 import express from "express";
 import pg from "pg";
+import { Server } from "socket.io";
 
 loadEnvFile();
 
 const { Pool } = pg;
 const app = express();
 const pool = new Pool();
+const httpServer = createServer(app);
+const io = new Server(httpServer);
 const port = Number(process.env.PORT ?? 3000);
 const receptionistStatuses = ['Scheduled', 'Arrived', 'Cancelled'];
 const clinicianStatuses = ['In Consultation', 'Completed'];
 
 app.use(express.json());
+
+function emitToOtherClients(req, event, payload) {
+  const socketId = req.get('x-socket-id');
+  const broadcaster = socketId ? io.except(socketId) : io;
+  broadcaster.emit(event, payload);
+}
+
+io.on('connection', (socket) => {
+  console.log(`ClinicFlow client connected: ${socket.id}`);
+});
 
 const asyncRoute = (handler) => (req, res, next) =>
   Promise.resolve(handler(req, res, next)).catch(next);
@@ -35,8 +49,30 @@ function validWindow(startsAt, endsAt) {
   return Number.isFinite(start) && Number.isFinite(end) && end > start;
 }
 
-async function findOverlap(staffId, startsAt, endsAt, ignoredId = 0) {
-  return pool.query(
+function requestError(status, message) {
+  const error = new Error(message);
+  error.status = status;
+  return error;
+}
+
+async function withActorTransaction(role, operation) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query("SELECT set_config('app.actor_role', $1, true)", [role]);
+    const result = await operation(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function findOverlap(db, staffId, startsAt, endsAt, ignoredId = 0) {
+  return db.query(
     `SELECT id
      FROM appointments
      WHERE staff_id = $1
@@ -122,6 +158,46 @@ app.get(
   }),
 );
 
+app.get(
+  '/api/appointments/:id/audit-logs',
+  allowRoles('Receptionist', 'Clinician'),
+  asyncRoute(async (req, res) => {
+    const appointmentId = Number(req.params.id);
+    if (!appointmentId) {
+      return res.status(400).json({ error: 'Use a valid appointment ID.' });
+    }
+
+    const result = await pool.query(
+      `SELECT a.id,
+              a.action_type AS "actionType",
+              a.entity_type AS "entityType",
+              a.entity_id AS "entityId",
+              a.old_values AS "oldValues",
+              a.new_values AS "newValues",
+              a.actor_role AS "actorRole",
+              a.created_at AS "createdAt",
+              old_patient.full_name AS "oldPatientName",
+              new_patient.full_name AS "newPatientName",
+              old_staff.full_name AS "oldStaffName",
+              new_staff.full_name AS "newStaffName"
+       FROM audit_logs a
+       LEFT JOIN patients old_patient
+         ON old_patient.id = (a.old_values ->> 'patientId')::integer
+       LEFT JOIN patients new_patient
+         ON new_patient.id = (a.new_values ->> 'patientId')::integer
+       LEFT JOIN staff old_staff
+         ON old_staff.id = (a.old_values ->> 'staffId')::integer
+       LEFT JOIN staff new_staff
+         ON new_staff.id = (a.new_values ->> 'staffId')::integer
+       WHERE a.entity_type = 'appointment' AND a.entity_id = $1
+       ORDER BY a.created_at DESC, a.id DESC`,
+      [appointmentId],
+    );
+
+    res.json(result.rows);
+  }),
+);
+
 app.post('/api/patients', allowRoles('Receptionist'), asyncRoute(async (req, res) => {
   const fullName = String(req.body.fullName ?? '').trim();
   const phone = String(req.body.phone ?? '').trim();
@@ -131,19 +207,23 @@ app.post('/api/patients', allowRoles('Receptionist'), asyncRoute(async (req, res
     return res.status(400).json({ error: 'Name, phone, and date of birth are required.' });
   }
 
-  const existing = await pool.query('SELECT id FROM patients WHERE phone = $1', [phone]);
-  if (existing.rows.length) {
-    return res.status(409).json({ error: 'A fictional patient already uses that phone number.' });
-  }
+  const patient = await withActorTransaction(req.get('x-demo-role'), async (client) => {
+    const existing = await client.query('SELECT id FROM patients WHERE phone = $1', [phone]);
+    if (existing.rows.length) {
+      throw requestError(409, 'A fictional patient already uses that phone number.');
+    }
 
-  const result = await pool.query(
-    `INSERT INTO patients (full_name, phone, date_of_birth)
-     VALUES ($1, $2, $3)
-     RETURNING id`,
-    [fullName, phone, dateOfBirth],
-  );
+    const result = await client.query(
+      `INSERT INTO patients (full_name, phone, date_of_birth)
+       VALUES ($1, $2, $3)
+       RETURNING id`,
+      [fullName, phone, dateOfBirth],
+    );
+    return result.rows[0];
+  });
 
-  res.status(201).json(result.rows[0]);
+  emitToOtherClients(req, 'patient:created', { patientId: patient.id });
+  res.status(201).json(patient);
 }));
 
 app.post('/api/appointments', allowRoles('Receptionist'), asyncRoute(async (req, res) => {
@@ -157,24 +237,32 @@ app.post('/api/appointments', allowRoles('Receptionist'), asyncRoute(async (req,
     return res.status(400).json({ error: 'Complete every booking field with a valid time range.' });
   }
 
-  const overlap = await findOverlap(staffId, startsAt, endsAt);
-  if (overlap.rows.length) {
-    return res.status(409).json({ error: 'That clinician already has an overlapping appointment.' });
-  }
-    const result = await pool.query(
-    `INSERT INTO appointments
-       (patient_id, staff_id, starts_at, ends_at, status, reason)
-     VALUES ($1, $2, $3, $4, 'Scheduled', $5)
-     ON CONFLICT DO NOTHING
-     RETURNING id`,
-    [patientId, staffId, startsAt, endsAt, reason],
-  );
+  const appointment = await withActorTransaction(req.get('x-demo-role'), async (client) => {
+    const overlap = await findOverlap(client, staffId, startsAt, endsAt);
+    if (overlap.rows.length) {
+      throw requestError(409, 'That clinician already has an overlapping appointment.');
+    }
 
-  if (!result.rows.length) {
-    return res.status(409).json({ error: 'That clinician already has an overlapping appointment.' });
-  }
+    const result = await client.query(
+      `INSERT INTO appointments
+         (patient_id, staff_id, starts_at, ends_at, status, reason)
+       VALUES ($1, $2, $3, $4, 'Scheduled', $5)
+       ON CONFLICT DO NOTHING
+       RETURNING id`,
+      [patientId, staffId, startsAt, endsAt, reason],
+    );
 
-  res.status(201).json(result.rows[0]);
+    if (!result.rows.length) {
+      throw requestError(409, 'That clinician already has an overlapping appointment.');
+    }
+    return result.rows[0];
+  });
+
+  emitToOtherClients(req, 'appointment:created', {
+    appointmentId: appointment.id,
+    affectedDates: [startsAt.slice(0, 10)],
+  });
+  res.status(201).json(appointment);
 }));
 
 app.patch(
@@ -191,19 +279,30 @@ app.patch(
       return res.status(403).json({ error: `${role} cannot set status to ${status}.` });
     }
 
-    const result = await pool.query(
-      `UPDATE appointments
-       SET status = $1
-       WHERE id = $2
-       RETURNING id`,
-      [status, Number(req.params.id)],
-    );
+    const appointment = await withActorTransaction(role, async (client) => {
+      const result = await client.query(
+        `UPDATE appointments
+         SET status = $1
+         WHERE id = $2
+         RETURNING id,
+                   to_char(starts_at, 'YYYY-MM-DD') AS "date"`,
+        [status, Number(req.params.id)],
+      );
 
-    if (!result.rows.length) {
-      return res.status(404).json({ error: 'Appointment not found.' });
-    }
-
-    res.json(result.rows[0]);
+      if (!result.rows.length) {
+        throw requestError(404, 'Appointment not found.');
+      }
+      return result.rows[0];
+    });
+    const event = status === 'Cancelled'
+      ? 'appointment:cancelled'
+      : 'appointment:status-changed';
+    emitToOtherClients(req, event, {
+      appointmentId: appointment.id,
+      status,
+      affectedDates: [appointment.date],
+    });
+    res.json({ id: appointment.id });
   }),
 );
 
@@ -220,12 +319,26 @@ app.patch(
       return res.status(400).json({ error: 'Choose a valid clinician and time range.' });
     }
 
-    const overlap = await findOverlap(staffId, startsAt, endsAt, appointmentId);
-    if (overlap.rows.length) {
-      return res.status(409).json({ error: 'That clinician already has an overlapping appointment.' });
-    }
-        try {
-      const result = await pool.query(
+    const { appointment, previousDate } = await withActorTransaction(
+      req.get('x-demo-role'),
+      async (client) => {
+        const existingAppointment = await client.query(
+          `SELECT to_char(starts_at, 'YYYY-MM-DD') AS "date"
+           FROM appointments
+           WHERE id = $1`,
+          [appointmentId],
+        );
+
+        if (!existingAppointment.rows.length) {
+          throw requestError(404, 'Appointment not found.');
+        }
+
+        const overlap = await findOverlap(client, staffId, startsAt, endsAt, appointmentId);
+        if (overlap.rows.length) {
+          throw requestError(409, 'That clinician already has an overlapping appointment.');
+        }
+
+        const result = await client.query(
         `UPDATE appointments
          SET staff_id = $1,
              starts_at = $2,
@@ -234,24 +347,38 @@ app.patch(
          WHERE id = $4
          RETURNING id`,
         [staffId, startsAt, endsAt, appointmentId],
-      );
+        );
 
-      if (!result.rows.length) {
-        return res.status(404).json({ error: 'Appointment not found.' });
-      }
+        if (!result.rows.length) {
+          throw requestError(404, 'Appointment not found.');
+        }
 
-      res.json(result.rows[0]);
-    } catch {
-      res.status(409).json({ error: 'The database rejected that overlapping time range.' });
-    }
+        return {
+          appointment: result.rows[0],
+          previousDate: existingAppointment.rows[0].date,
+        };
+      },
+    );
+
+    emitToOtherClients(req, 'appointment:rescheduled', {
+      appointmentId: appointment.id,
+      affectedDates: [...new Set([previousDate, startsAt.slice(0, 10)])],
+    });
+    res.json(appointment);
   }),
 );
 
 app.use((error, _req, res, _next) => {
+  if (error.status) {
+    return res.status(error.status).json({ error: error.message });
+  }
+  if (error.code === '23P01') {
+    return res.status(409).json({ error: 'The database rejected that overlapping time range.' });
+  }
   console.error(error);
   res.status(500).json({ error: 'Unexpected server error.' });
 });
 
-app.listen(port, () => {
+httpServer.listen(port, () => {
   console.log(`ClinicFlow API running at http://localhost:${port}`);
 });

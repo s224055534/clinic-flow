@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { socket } from "./socket.js";
 
 // Keep the demonstration fixed to one fictional clinic day
 const DEMO_DATE = "2026-09-16";
@@ -10,6 +11,39 @@ const emptyBooking = {
   endsAt: `${DEMO_DATE}T09:30`,
   reason: "",
 };
+const auditActionLabels = {
+  "appointment.created": "Appointment created",
+  "appointment.status_changed": "Status changed",
+  "appointment.cancelled": "Appointment cancelled",
+  "appointment.rescheduled": "Appointment rescheduled",
+};
+
+function formatTimeRange(snapshot) {
+  if (!snapshot?.startsAt || !snapshot?.endsAt) return "an unknown time";
+  return `${snapshot.startsAt.slice(11)}–${snapshot.endsAt.slice(11)}`;
+}
+
+function describeAuditEvent(log) {
+  const oldValues = log.oldValues;
+  const newValues = log.newValues;
+  const oldPatient = log.oldPatientName || "Unknown patient";
+  const newPatient = log.newPatientName || oldPatient;
+  const oldStaff = log.oldStaffName || "Unknown clinician";
+  const newStaff = log.newStaffName || oldStaff;
+
+  switch (log.actionType) {
+    case "appointment.created":
+      return `Appointment booked for ${newPatient} with ${newStaff} (${formatTimeRange(newValues)}).`;
+    case "appointment.rescheduled":
+      return `Appointment rescheduled from ${oldStaff} (${formatTimeRange(oldValues)}) to ${newStaff} (${formatTimeRange(newValues)}).`;
+    case "appointment.status_changed":
+      return `Appointment status changed from ${oldValues?.status || "Unknown"} to ${newValues?.status || "Unknown"}.`;
+    case "appointment.cancelled":
+      return `Appointment for ${newPatient} with ${newStaff} was cancelled.`;
+    default:
+      return auditActionLabels[log.actionType] || log.actionType;
+  }
+}
 
 export default function App() {
   // Hold the temporary dashboard data and form values in browser memory
@@ -26,6 +60,14 @@ export default function App() {
   const [reschedule, setReschedule] = useState(null);
   const [message, setMessage] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
+  const [historyAppointment, setHistoryAppointment] = useState(null);
+  const [auditLogs, setAuditLogs] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const selectedDateRef = useRef(date);
+
+  useEffect(() => {
+    selectedDateRef.current = date;
+  }, [date]);
 
   useEffect(() => {
     let active = true;
@@ -55,6 +97,7 @@ export default function App() {
       headers: {
         "Content-Type": "application/json",
         "x-demo-role": role,
+        ...(socket.id ? { "x-socket-id": socket.id } : {}),
       },
     });
     const body = await response.json();
@@ -62,10 +105,58 @@ export default function App() {
     return body;
   }
 
-  function refresh(successMessage) {
-    setMessage(successMessage);
+  const refresh = useCallback((successMessage) => {
+    if (successMessage) setMessage(successMessage);
     setRefreshKey((value) => value + 1);
-  }
+  }, []);
+
+  useEffect(() => {
+    function refreshScheduleIfVisible({ affectedDates = [] } = {}) {
+      if (!affectedDates.length || affectedDates.includes(selectedDateRef.current)) {
+        refresh();
+      }
+    }
+
+    socket.on("appointment:created", refreshScheduleIfVisible);
+    socket.on("appointment:rescheduled", refreshScheduleIfVisible);
+    socket.on("appointment:status-changed", refreshScheduleIfVisible);
+    socket.on("appointment:cancelled", refreshScheduleIfVisible);
+    socket.on("patient:created", refresh);
+    socket.connect();
+
+    return () => {
+      socket.off("appointment:created", refreshScheduleIfVisible);
+      socket.off("appointment:rescheduled", refreshScheduleIfVisible);
+      socket.off("appointment:status-changed", refreshScheduleIfVisible);
+      socket.off("appointment:cancelled", refreshScheduleIfVisible);
+      socket.off("patient:created", refresh);
+      socket.disconnect();
+    };
+  }, [refresh]);
+
+  useEffect(() => {
+    if (!historyAppointment) return undefined;
+
+    let active = true;
+    setHistoryLoading(true);
+
+    request(`/api/appointments/${historyAppointment.id}/audit-logs`, {
+      method: "GET",
+    })
+      .then((logs) => {
+        if (active) setAuditLogs(logs);
+      })
+      .catch((error) => {
+        if (active) setMessage(error.message || "Could not load appointment history.");
+      })
+      .finally(() => {
+        if (active) setHistoryLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [historyAppointment, refreshKey, role]);
 
   async function submitPatient(event) {
     event.preventDefault();
@@ -309,6 +400,9 @@ export default function App() {
                           </button>
                         </>
                       )}
+                      <button onClick={() => setHistoryAppointment(appointment)}>
+                        History
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -493,6 +587,43 @@ export default function App() {
             </button>
           </div>
         </form>
+      )}
+      {historyAppointment && (
+        <section className="card appointment-history">
+          <div className="section-heading">
+            <div>
+              <h2>Appointment history</h2>
+              <p>
+                {historyAppointment.patientName} with {historyAppointment.staffName}
+              </p>
+            </div>
+            <button type="button" onClick={() => setHistoryAppointment(null)}>
+              Close history
+            </button>
+          </div>
+          {historyLoading ? (
+            <p>Loading history…</p>
+          ) : (
+            <ol className="timeline">
+              {auditLogs.map((log) => (
+                <li key={log.id}>
+                  <div className="timeline-marker" aria-hidden="true" />
+                  <article>
+                    <div className="timeline-heading">
+                      <strong>{auditActionLabels[log.actionType] || log.actionType}</strong>
+                      <time dateTime={log.createdAt}>
+                        {new Date(log.createdAt).toLocaleString()}
+                      </time>
+                    </div>
+                    <p>Performed by: {log.actorRole}</p>
+                    <p className="timeline-summary">{describeAuditEvent(log)}</p>
+                  </article>
+                </li>
+              ))}
+              {!auditLogs.length && <li>No audit history is available yet.</li>}
+            </ol>
+          )}
+        </section>
       )}
       <section className="card">
         <h2>Patient records</h2>
