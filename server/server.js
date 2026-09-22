@@ -1,14 +1,13 @@
-import { loadEnvFile } from "node:process";
 import { createServer } from "node:http";
 import express from "express";
 import pg from "pg";
 import { Server } from "socket.io";
 
-loadEnvFile();
-
 const { Pool } = pg;
 const app = express();
-const pool = new Pool();
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+});
 const httpServer = createServer(app);
 const io = new Server(httpServer);
 const port = Number(process.env.PORT ?? 3000);
