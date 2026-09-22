@@ -2,7 +2,6 @@ import { createServer } from "node:http";
 import express from "express";
 import pg from "pg";
 import { Server } from "socket.io";
-const API_URL = import.meta.env.VITE_API_URL || "";
 import cors from "cors";
 
 const { Pool } = pg;
@@ -125,7 +124,7 @@ async function findOverlap(db, staffId, startsAt, endsAt, ignoredId = 0) {
 }
 
 app.get(
-  `${API_URL}/api/health`,
+  '/api/health',
   asyncRoute(async (_req, res) => {
     const result = await pool.query("SELECT 1 AS ok");
     res.json({ ok: result.rows[0].ok === 1 });
@@ -133,7 +132,7 @@ app.get(
 );
 
 app.get(
-  `${API_URL}/api/data`,
+  '/api/data',
   asyncRoute(async (req, res) => {
     const date = String(req.query.date ?? "");
     const search = `%${String(req.query.q ?? "").trim()}%`;
@@ -198,7 +197,7 @@ app.get(
 );
 
 app.get(
-  `${API_URL}/api/appointments/:id/audit-logs`,
+  '/api/appointments/:id/audit-logs',
   allowRoles("Receptionist", "Clinician"),
   asyncRoute(async (req, res) => {
     const appointmentId = Number(req.params.id);
@@ -238,7 +237,7 @@ app.get(
 );
 
 app.get(
-  `${API_URL}/api/analytics/summary`,
+  '/api/analytics/summary',
   allowRoles("Receptionist", "Clinician"),
   asyncRoute(async (req, res) => {
     const filters = analyticsFilters(req);
@@ -283,7 +282,7 @@ app.get(
 );
 
 app.get(
-  `${API_URL}/api/analytics/trends`,
+  '/api/analytics/trends',
   allowRoles("Receptionist", "Clinician"),
   asyncRoute(async (req, res) => {
     const filters = analyticsFilters(req);
@@ -343,7 +342,7 @@ app.get(
 );
 
 app.get(
-  `${API_URL}/api/analytics/clinicians`,
+  '/api/analytics/clinicians',
   allowRoles("Receptionist", "Clinician"),
   asyncRoute(async (req, res) => {
     const filters = analyticsFilters(req);
@@ -377,7 +376,7 @@ app.get(
 );
 
 app.get(
-  `${API_URL}/api/analytics/status-distribution`,
+  '/api/analytics/status-distribution',
   allowRoles("Receptionist", "Clinician"),
   asyncRoute(async (req, res) => {
     const filters = analyticsFilters(req);
@@ -402,7 +401,7 @@ app.get(
 );
 
 app.post(
-  `${API_URL}/api/patients`,
+  '/api/patients',
   allowRoles("Receptionist"),
   asyncRoute(async (req, res) => {
     const fullName = String(req.body.fullName ?? "").trim();
@@ -445,7 +444,7 @@ app.post(
 );
 
 app.post(
-  `${API_URL}/api/appointments`,
+  '/api/appointments',
   allowRoles("Receptionist"),
   asyncRoute(async (req, res) => {
     const patientId = Number(req.body.patientId);
@@ -501,7 +500,7 @@ app.post(
 );
 
 app.patch(
-  `${API_URL}/api/appointments/:id/status`,
+  '/api/appointments/:id/status',
   allowRoles("Receptionist", "Clinician"),
   asyncRoute(async (req, res) => {
     const role = req.get("x-demo-role");
@@ -544,7 +543,7 @@ app.patch(
 );
 
 app.patch(
-  `${API_URL}/api/appointments/:id/reschedule`,
+  '/api/appointments/:id/reschedule',
   allowRoles("Receptionist"),
   asyncRoute(async (req, res) => {
     const appointmentId = Number(req.params.id);
