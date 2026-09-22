@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { socket } from "./socket.js";
+const API_URL = import.meta.env.VITE_API_URL || "";
 
 const AnalyticsDashboard = lazy(() => import("./components/AnalyticsDashboard.jsx"));
 
@@ -78,7 +79,7 @@ export default function App() {
     async function loadData() {
       try {
         const response = await fetch(
-          `/api/data?date=${encodeURIComponent(date)}&q=${encodeURIComponent(search)}`,
+          `${API_URL}/api/data?date=${encodeURIComponent(date)}&q=${encodeURIComponent(search)}`,
         );
         const body = await response.json();
         if (!response.ok) throw new Error(body.error);
@@ -143,7 +144,7 @@ export default function App() {
     let active = true;
     setHistoryLoading(true);
 
-    request(`/api/appointments/${historyAppointment.id}/audit-logs`, {
+    request(`${API_URL}/api/appointments/${historyAppointment.id}/audit-logs`, {
       method: "GET",
     })
       .then((logs) => {
@@ -164,7 +165,7 @@ export default function App() {
   async function submitPatient(event) {
     event.preventDefault();
     try {
-      await request("/api/patients", {
+      await request(`${API_URL}/api/patients`, {
         method: "POST",
         body: JSON.stringify(patient),
       });
@@ -178,7 +179,7 @@ export default function App() {
   async function submitBooking(event) {
     event.preventDefault();
     try {
-      await request("/api/appointments", {
+      await request(`${API_URL}/api/appointments`, {
         method: "POST",
         body: JSON.stringify(booking),
       });
@@ -191,7 +192,7 @@ export default function App() {
 
   async function updateStatus(id, status) {
     try {
-      await request(`/api/appointments/${id}/status`, {
+      await request(`${API_URL}/api/appointments/${id}/status`, {
         method: "PATCH",
         body: JSON.stringify({ status }),
       });
@@ -204,7 +205,7 @@ export default function App() {
   async function submitReschedule(event) {
     event.preventDefault();
     try {
-      await request(`/api/appointments/${reschedule.id}/reschedule`, {
+      await request(`${API_URL}/api/appointments/${reschedule.id}/reschedule`, {
         method: "PATCH",
         body: JSON.stringify(reschedule),
         "x-demo-role": role,

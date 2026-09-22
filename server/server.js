@@ -2,27 +2,40 @@ import { createServer } from "node:http";
 import express from "express";
 import pg from "pg";
 import { Server } from "socket.io";
+const API_URL = import.meta.env.VITE_API_URL || "";
+import cors from "cors";
 
 const { Pool } = pg;
 const app = express();
+app.use(cors({
+  origin: ["https://clinic-flow-1.onrender.com"],
+  methods: ["GET", "POST", "PATCH"],
+  credentials: true,
+}));
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
 });
 const httpServer = createServer(app);
-const io = new Server(httpServer);
+const io = new Server(httpServer, {
+  cors: {
+    origin: ["https://clinic-flow-1.onrender.com"],
+    methods: ["GET", "POST"],
+    credentials: true,
+  },
+});
 const port = Number(process.env.PORT ?? 3000);
-const receptionistStatuses = ['Scheduled', 'Arrived', 'Cancelled'];
-const clinicianStatuses = ['In Consultation', 'Completed'];
+const receptionistStatuses = ["Scheduled", "Arrived", "Cancelled"];
+const clinicianStatuses = ["In Consultation", "Completed"];
 
 app.use(express.json());
 
 function emitToOtherClients(req, event, payload) {
-  const socketId = req.get('x-socket-id');
+  const socketId = req.get("x-socket-id");
   const broadcaster = socketId ? io.except(socketId) : io;
   broadcaster.emit(event, payload);
 }
 
-io.on('connection', (socket) => {
+io.on("connection", (socket) => {
   console.log(`ClinicFlow client connected: ${socket.id}`);
 });
 
@@ -31,9 +44,11 @@ const asyncRoute = (handler) => (req, res, next) =>
 
 function allowRoles(...allowedRoles) {
   return (req, res, next) => {
-    const role = req.get('x-demo-role');
+    const role = req.get("x-demo-role");
     if (!allowedRoles.includes(role)) {
-      return res.status(403).json({ error: 'This demo role cannot perform that action.' });
+      return res
+        .status(403)
+        .json({ error: "This demo role cannot perform that action." });
     }
     next();
   };
@@ -44,22 +59,24 @@ function validDate(value) {
 
 function validCalendarDate(value) {
   const date = new Date(`${value}T00:00:00Z`);
-  return validDate(value)
-    && Number.isFinite(date.getTime())
-    && date.toISOString().slice(0, 10) === value;
+  return (
+    validDate(value) &&
+    Number.isFinite(date.getTime()) &&
+    date.toISOString().slice(0, 10) === value
+  );
 }
 
 function analyticsFilters(req) {
-  const from = String(req.query.from ?? '');
-  const to = String(req.query.to ?? '');
-  const staffIdValue = String(req.query.staffId ?? '');
+  const from = String(req.query.from ?? "");
+  const to = String(req.query.to ?? "");
+  const staffIdValue = String(req.query.staffId ?? "");
   const staffId = staffIdValue ? Number(staffIdValue) : null;
 
   if (!validCalendarDate(from) || !validCalendarDate(to) || from > to) {
-    throw requestError(400, 'Use a valid date range in YYYY-MM-DD format.');
+    throw requestError(400, "Use a valid date range in YYYY-MM-DD format.");
   }
   if (staffIdValue && (!Number.isInteger(staffId) || staffId < 1)) {
-    throw requestError(400, 'Use a valid clinician ID.');
+    throw requestError(400, "Use a valid clinician ID.");
   }
 
   return [from, to, staffId];
@@ -80,13 +97,13 @@ function requestError(status, message) {
 async function withActorTransaction(role, operation) {
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    await client.query("BEGIN");
     await client.query("SELECT set_config('app.actor_role', $1, true)", [role]);
     const result = await operation(client);
-    await client.query('COMMIT');
+    await client.query("COMMIT");
     return result;
   } catch (error) {
-    await client.query('ROLLBACK');
+    await client.query("ROLLBACK");
     throw error;
   } finally {
     client.release();
@@ -108,7 +125,7 @@ async function findOverlap(db, staffId, startsAt, endsAt, ignoredId = 0) {
 }
 
 app.get(
-  "/api/health",
+  `${API_URL}/api/health`,
   asyncRoute(async (_req, res) => {
     const result = await pool.query("SELECT 1 AS ok");
     res.json({ ok: result.rows[0].ok === 1 });
@@ -116,7 +133,7 @@ app.get(
 );
 
 app.get(
-  "/api/data",
+  `${API_URL}/api/data`,
   asyncRoute(async (req, res) => {
     const date = String(req.query.date ?? "");
     const search = `%${String(req.query.q ?? "").trim()}%`;
@@ -181,12 +198,12 @@ app.get(
 );
 
 app.get(
-  '/api/appointments/:id/audit-logs',
-  allowRoles('Receptionist', 'Clinician'),
+  `${API_URL}/api/appointments/:id/audit-logs`,
+  allowRoles("Receptionist", "Clinician"),
   asyncRoute(async (req, res) => {
     const appointmentId = Number(req.params.id);
     if (!appointmentId) {
-      return res.status(400).json({ error: 'Use a valid appointment ID.' });
+      return res.status(400).json({ error: "Use a valid appointment ID." });
     }
 
     const result = await pool.query(
@@ -221,8 +238,8 @@ app.get(
 );
 
 app.get(
-  '/api/analytics/summary',
-  allowRoles('Receptionist', 'Clinician'),
+  `${API_URL}/api/analytics/summary`,
+  allowRoles("Receptionist", "Clinician"),
   asyncRoute(async (req, res) => {
     const filters = analyticsFilters(req);
     const result = await pool.query(
@@ -266,8 +283,8 @@ app.get(
 );
 
 app.get(
-  '/api/analytics/trends',
-  allowRoles('Receptionist', 'Clinician'),
+  `${API_URL}/api/analytics/trends`,
+  allowRoles("Receptionist", "Clinician"),
   asyncRoute(async (req, res) => {
     const filters = analyticsFilters(req);
     const [daily, weekly, monthly, cancellations] = await Promise.all([
@@ -326,8 +343,8 @@ app.get(
 );
 
 app.get(
-  '/api/analytics/clinicians',
-  allowRoles('Receptionist', 'Clinician'),
+  `${API_URL}/api/analytics/clinicians`,
+  allowRoles("Receptionist", "Clinician"),
   asyncRoute(async (req, res) => {
     const filters = analyticsFilters(req);
     const result = await pool.query(
@@ -360,8 +377,8 @@ app.get(
 );
 
 app.get(
-  '/api/analytics/status-distribution',
-  allowRoles('Receptionist', 'Clinician'),
+  `${API_URL}/api/analytics/status-distribution`,
+  allowRoles("Receptionist", "Clinician"),
   asyncRoute(async (req, res) => {
     const filters = analyticsFilters(req);
     const result = await pool.query(
@@ -384,85 +401,118 @@ app.get(
   }),
 );
 
-app.post('/api/patients', allowRoles('Receptionist'), asyncRoute(async (req, res) => {
-  const fullName = String(req.body.fullName ?? '').trim();
-  const phone = String(req.body.phone ?? '').trim();
-  const dateOfBirth = String(req.body.dateOfBirth ?? '');
+app.post(
+  `${API_URL}/api/patients`,
+  allowRoles("Receptionist"),
+  asyncRoute(async (req, res) => {
+    const fullName = String(req.body.fullName ?? "").trim();
+    const phone = String(req.body.phone ?? "").trim();
+    const dateOfBirth = String(req.body.dateOfBirth ?? "");
 
-  if (!fullName || !phone || !validDate(dateOfBirth)) {
-    return res.status(400).json({ error: 'Name, phone, and date of birth are required.' });
-  }
-
-  const patient = await withActorTransaction(req.get('x-demo-role'), async (client) => {
-    const existing = await client.query('SELECT id FROM patients WHERE phone = $1', [phone]);
-    if (existing.rows.length) {
-      throw requestError(409, 'A fictional patient already uses that phone number.');
+    if (!fullName || !phone || !validDate(dateOfBirth)) {
+      return res
+        .status(400)
+        .json({ error: "Name, phone, and date of birth are required." });
     }
 
-    const result = await client.query(
-      `INSERT INTO patients (full_name, phone, date_of_birth)
+    const patient = await withActorTransaction(
+      req.get("x-demo-role"),
+      async (client) => {
+        const existing = await client.query(
+          "SELECT id FROM patients WHERE phone = $1",
+          [phone],
+        );
+        if (existing.rows.length) {
+          throw requestError(
+            409,
+            "A fictional patient already uses that phone number.",
+          );
+        }
+
+        const result = await client.query(
+          `INSERT INTO patients (full_name, phone, date_of_birth)
        VALUES ($1, $2, $3)
        RETURNING id`,
-      [fullName, phone, dateOfBirth],
+          [fullName, phone, dateOfBirth],
+        );
+        return result.rows[0];
+      },
     );
-    return result.rows[0];
-  });
 
-  emitToOtherClients(req, 'patient:created', { patientId: patient.id });
-  res.status(201).json(patient);
-}));
+    emitToOtherClients(req, "patient:created", { patientId: patient.id });
+    res.status(201).json(patient);
+  }),
+);
 
-app.post('/api/appointments', allowRoles('Receptionist'), asyncRoute(async (req, res) => {
-  const patientId = Number(req.body.patientId);
-  const staffId = Number(req.body.staffId);
-  const startsAt = String(req.body.startsAt ?? '');
-  const endsAt = String(req.body.endsAt ?? '');
-  const reason = String(req.body.reason ?? '').trim();
+app.post(
+  `${API_URL}/api/appointments`,
+  allowRoles("Receptionist"),
+  asyncRoute(async (req, res) => {
+    const patientId = Number(req.body.patientId);
+    const staffId = Number(req.body.staffId);
+    const startsAt = String(req.body.startsAt ?? "");
+    const endsAt = String(req.body.endsAt ?? "");
+    const reason = String(req.body.reason ?? "").trim();
 
-  if (!patientId || !staffId || !reason || !validWindow(startsAt, endsAt)) {
-    return res.status(400).json({ error: 'Complete every booking field with a valid time range.' });
-  }
-
-  const appointment = await withActorTransaction(req.get('x-demo-role'), async (client) => {
-    const overlap = await findOverlap(client, staffId, startsAt, endsAt);
-    if (overlap.rows.length) {
-      throw requestError(409, 'That clinician already has an overlapping appointment.');
+    if (!patientId || !staffId || !reason || !validWindow(startsAt, endsAt)) {
+      return res
+        .status(400)
+        .json({
+          error: "Complete every booking field with a valid time range.",
+        });
     }
 
-    const result = await client.query(
-      `INSERT INTO appointments
+    const appointment = await withActorTransaction(
+      req.get("x-demo-role"),
+      async (client) => {
+        const overlap = await findOverlap(client, staffId, startsAt, endsAt);
+        if (overlap.rows.length) {
+          throw requestError(
+            409,
+            "That clinician already has an overlapping appointment.",
+          );
+        }
+
+        const result = await client.query(
+          `INSERT INTO appointments
          (patient_id, staff_id, starts_at, ends_at, status, reason)
        VALUES ($1, $2, $3, $4, 'Scheduled', $5)
        ON CONFLICT DO NOTHING
        RETURNING id`,
-      [patientId, staffId, startsAt, endsAt, reason],
+          [patientId, staffId, startsAt, endsAt, reason],
+        );
+
+        if (!result.rows.length) {
+          throw requestError(
+            409,
+            "That clinician already has an overlapping appointment.",
+          );
+        }
+        return result.rows[0];
+      },
     );
 
-    if (!result.rows.length) {
-      throw requestError(409, 'That clinician already has an overlapping appointment.');
-    }
-    return result.rows[0];
-  });
-
-  emitToOtherClients(req, 'appointment:created', {
-    appointmentId: appointment.id,
-    affectedDates: [startsAt.slice(0, 10)],
-  });
-  res.status(201).json(appointment);
-}));
+    emitToOtherClients(req, "appointment:created", {
+      appointmentId: appointment.id,
+      affectedDates: [startsAt.slice(0, 10)],
+    });
+    res.status(201).json(appointment);
+  }),
+);
 
 app.patch(
-  '/api/appointments/:id/status',
-  allowRoles('Receptionist', 'Clinician'),
+  `${API_URL}/api/appointments/:id/status`,
+  allowRoles("Receptionist", "Clinician"),
   asyncRoute(async (req, res) => {
-    const role = req.get('x-demo-role');
-    const status = String(req.body.status ?? '');
-    const allowedStatuses = role === 'Receptionist'
-      ? receptionistStatuses
-      : clinicianStatuses;
+    const role = req.get("x-demo-role");
+    const status = String(req.body.status ?? "");
+    const allowedStatuses =
+      role === "Receptionist" ? receptionistStatuses : clinicianStatuses;
 
     if (!allowedStatuses.includes(status)) {
-      return res.status(403).json({ error: `${role} cannot set status to ${status}.` });
+      return res
+        .status(403)
+        .json({ error: `${role} cannot set status to ${status}.` });
     }
 
     const appointment = await withActorTransaction(role, async (client) => {
@@ -476,13 +526,14 @@ app.patch(
       );
 
       if (!result.rows.length) {
-        throw requestError(404, 'Appointment not found.');
+        throw requestError(404, "Appointment not found.");
       }
       return result.rows[0];
     });
-    const event = status === 'Cancelled'
-      ? 'appointment:cancelled'
-      : 'appointment:status-changed';
+    const event =
+      status === "Cancelled"
+        ? "appointment:cancelled"
+        : "appointment:status-changed";
     emitToOtherClients(req, event, {
       appointmentId: appointment.id,
       status,
@@ -493,20 +544,22 @@ app.patch(
 );
 
 app.patch(
-  '/api/appointments/:id/reschedule',
-  allowRoles('Receptionist'),
+  `${API_URL}/api/appointments/:id/reschedule`,
+  allowRoles("Receptionist"),
   asyncRoute(async (req, res) => {
     const appointmentId = Number(req.params.id);
     const staffId = Number(req.body.staffId);
-    const startsAt = String(req.body.startsAt ?? '');
-    const endsAt = String(req.body.endsAt ?? '');
+    const startsAt = String(req.body.startsAt ?? "");
+    const endsAt = String(req.body.endsAt ?? "");
 
     if (!appointmentId || !staffId || !validWindow(startsAt, endsAt)) {
-      return res.status(400).json({ error: 'Choose a valid clinician and time range.' });
+      return res
+        .status(400)
+        .json({ error: "Choose a valid clinician and time range." });
     }
 
     const { appointment, previousDate } = await withActorTransaction(
-      req.get('x-demo-role'),
+      req.get("x-demo-role"),
       async (client) => {
         const existingAppointment = await client.query(
           `SELECT to_char(starts_at, 'YYYY-MM-DD') AS "date"
@@ -516,27 +569,36 @@ app.patch(
         );
 
         if (!existingAppointment.rows.length) {
-          throw requestError(404, 'Appointment not found.');
+          throw requestError(404, "Appointment not found.");
         }
 
-        const overlap = await findOverlap(client, staffId, startsAt, endsAt, appointmentId);
+        const overlap = await findOverlap(
+          client,
+          staffId,
+          startsAt,
+          endsAt,
+          appointmentId,
+        );
         if (overlap.rows.length) {
-          throw requestError(409, 'That clinician already has an overlapping appointment.');
+          throw requestError(
+            409,
+            "That clinician already has an overlapping appointment.",
+          );
         }
 
         const result = await client.query(
-        `UPDATE appointments
+          `UPDATE appointments
          SET staff_id = $1,
              starts_at = $2,
              ends_at = $3,
              status = 'Scheduled'
          WHERE id = $4
          RETURNING id`,
-        [staffId, startsAt, endsAt, appointmentId],
+          [staffId, startsAt, endsAt, appointmentId],
         );
 
         if (!result.rows.length) {
-          throw requestError(404, 'Appointment not found.');
+          throw requestError(404, "Appointment not found.");
         }
 
         return {
@@ -546,7 +608,7 @@ app.patch(
       },
     );
 
-    emitToOtherClients(req, 'appointment:rescheduled', {
+    emitToOtherClients(req, "appointment:rescheduled", {
       appointmentId: appointment.id,
       affectedDates: [...new Set([previousDate, startsAt.slice(0, 10)])],
     });
@@ -558,11 +620,13 @@ app.use((error, _req, res, _next) => {
   if (error.status) {
     return res.status(error.status).json({ error: error.message });
   }
-  if (error.code === '23P01') {
-    return res.status(409).json({ error: 'The database rejected that overlapping time range.' });
+  if (error.code === "23P01") {
+    return res
+      .status(409)
+      .json({ error: "The database rejected that overlapping time range." });
   }
   console.error(error);
-  res.status(500).json({ error: 'Unexpected server error.' });
+  res.status(500).json({ error: "Unexpected server error." });
 });
 
 httpServer.listen(port, () => {
