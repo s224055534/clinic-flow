@@ -6,7 +6,7 @@ import {
   StatusPieChart,
   TrendLineChart,
 } from "./AnalyticsCharts.jsx";
-
+const API_URL = import.meta.env.VITE_API_URL || "";
 function monthBounds(date) {
   const [year, month] = date.split("-").map(Number);
   const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
