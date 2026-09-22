@@ -43,6 +43,29 @@ function validDate(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
 
+function validCalendarDate(value) {
+  const date = new Date(`${value}T00:00:00Z`);
+  return validDate(value)
+    && Number.isFinite(date.getTime())
+    && date.toISOString().slice(0, 10) === value;
+}
+
+function analyticsFilters(req) {
+  const from = String(req.query.from ?? '');
+  const to = String(req.query.to ?? '');
+  const staffIdValue = String(req.query.staffId ?? '');
+  const staffId = staffIdValue ? Number(staffIdValue) : null;
+
+  if (!validCalendarDate(from) || !validCalendarDate(to) || from > to) {
+    throw requestError(400, 'Use a valid date range in YYYY-MM-DD format.');
+  }
+  if (staffIdValue && (!Number.isInteger(staffId) || staffId < 1)) {
+    throw requestError(400, 'Use a valid clinician ID.');
+  }
+
+  return [from, to, staffId];
+}
+
 function validWindow(startsAt, endsAt) {
   const start = Date.parse(startsAt);
   const end = Date.parse(endsAt);
@@ -194,6 +217,170 @@ app.get(
       [appointmentId],
     );
 
+    res.json(result.rows);
+  }),
+);
+
+app.get(
+  '/api/analytics/summary',
+  allowRoles('Receptionist', 'Clinician'),
+  asyncRoute(async (req, res) => {
+    const filters = analyticsFilters(req);
+    const result = await pool.query(
+      `WITH filtered AS (
+         SELECT starts_at::date AS appointment_date,
+                status,
+                EXTRACT(EPOCH FROM (ends_at - starts_at)) / 3600 AS booked_hours
+         FROM appointments
+         WHERE starts_at >= $1::date
+           AND starts_at < ($2::date + INTERVAL '1 day')
+           AND ($3::integer IS NULL OR staff_id = $3)
+       ), daily AS (
+         SELECT appointment_date, COUNT(*)::integer AS appointment_count
+         FROM filtered
+         GROUP BY appointment_date
+       )
+       SELECT COUNT(*)::integer AS "totalAppointments",
+              COUNT(*) FILTER (WHERE status = 'Cancelled')::integer AS "cancelledAppointments",
+              COALESCE(ROUND(
+                100.0 * COUNT(*) FILTER (WHERE status = 'Cancelled') / NULLIF(COUNT(*), 0),
+                1
+              ), 0) AS "cancellationRate",
+              COALESCE(ROUND(
+                (SUM(booked_hours) FILTER (WHERE status <> 'Cancelled'))::numeric,
+                1
+              ), 0) AS "bookedHours",
+              COALESCE((
+                SELECT json_build_object(
+                  'date', to_char(appointment_date, 'YYYY-MM-DD'),
+                  'count', appointment_count
+                )
+                FROM daily
+                ORDER BY appointment_count DESC, appointment_date ASC
+                LIMIT 1
+              ), json_build_object('date', NULL, 'count', 0)) AS "busiestDay"
+       FROM filtered`,
+      filters,
+    );
+    res.json(result.rows[0]);
+  }),
+);
+
+app.get(
+  '/api/analytics/trends',
+  allowRoles('Receptionist', 'Clinician'),
+  asyncRoute(async (req, res) => {
+    const filters = analyticsFilters(req);
+    const [daily, weekly, monthly, cancellations] = await Promise.all([
+      pool.query(
+        `SELECT to_char(starts_at::date, 'YYYY-MM-DD') AS label, COUNT(*)::integer AS count
+         FROM appointments
+         WHERE starts_at >= $1::date
+           AND starts_at < ($2::date + INTERVAL '1 day')
+           AND ($3::integer IS NULL OR staff_id = $3)
+         GROUP BY starts_at::date
+         ORDER BY starts_at::date`,
+        filters,
+      ),
+      pool.query(
+        `SELECT to_char(date_trunc('week', starts_at), 'IYYY-"W"IW') AS label,
+                COUNT(*)::integer AS count
+         FROM appointments
+         WHERE starts_at >= $1::date
+           AND starts_at < ($2::date + INTERVAL '1 day')
+           AND ($3::integer IS NULL OR staff_id = $3)
+         GROUP BY date_trunc('week', starts_at)
+         ORDER BY date_trunc('week', starts_at)`,
+        filters,
+      ),
+      pool.query(
+        `SELECT to_char(date_trunc('month', starts_at), 'YYYY-MM') AS label,
+                COUNT(*)::integer AS count
+         FROM appointments
+         WHERE starts_at >= $1::date
+           AND starts_at < ($2::date + INTERVAL '1 day')
+           AND ($3::integer IS NULL OR staff_id = $3)
+         GROUP BY date_trunc('month', starts_at)
+         ORDER BY date_trunc('month', starts_at)`,
+        filters,
+      ),
+      pool.query(
+        `SELECT to_char(created_at::date, 'YYYY-MM-DD') AS label, COUNT(*)::integer AS count
+         FROM audit_logs
+         WHERE action_type = 'appointment.cancelled'
+           AND created_at >= $1::date
+           AND created_at < ($2::date + INTERVAL '1 day')
+           AND ($3::integer IS NULL OR (new_values ->> 'staffId')::integer = $3)
+         GROUP BY created_at::date
+         ORDER BY created_at::date`,
+        filters,
+      ),
+    ]);
+
+    res.json({
+      daily: daily.rows,
+      weekly: weekly.rows,
+      monthly: monthly.rows,
+      cancellations: cancellations.rows,
+    });
+  }),
+);
+
+app.get(
+  '/api/analytics/clinicians',
+  allowRoles('Receptionist', 'Clinician'),
+  asyncRoute(async (req, res) => {
+    const filters = analyticsFilters(req);
+    const result = await pool.query(
+      `WITH clinician_metrics AS (
+         SELECT s.id,
+                s.full_name AS "fullName",
+                COUNT(a.id) FILTER (WHERE a.status <> 'Cancelled')::integer AS "appointmentCount",
+                COALESCE(ROUND((SUM(
+                  EXTRACT(EPOCH FROM (a.ends_at - a.starts_at)) / 3600
+                ) FILTER (WHERE a.status <> 'Cancelled'))::numeric, 1), 0) AS "bookedHours"
+         FROM staff s
+         LEFT JOIN appointments a
+           ON a.staff_id = s.id
+          AND a.starts_at >= $1::date
+          AND a.starts_at < ($2::date + INTERVAL '1 day')
+         WHERE s.role = 'Clinician'
+           AND ($3::integer IS NULL OR s.id = $3)
+         GROUP BY s.id, s.full_name
+       )
+       SELECT *, COALESCE(ROUND(
+         100.0 * "appointmentCount" / NULLIF(SUM("appointmentCount") OVER (), 0),
+         1
+       ), 0) AS "workloadPercentage"
+       FROM clinician_metrics
+       ORDER BY "appointmentCount" DESC, "fullName"`,
+      filters,
+    );
+    res.json(result.rows);
+  }),
+);
+
+app.get(
+  '/api/analytics/status-distribution',
+  allowRoles('Receptionist', 'Clinician'),
+  asyncRoute(async (req, res) => {
+    const filters = analyticsFilters(req);
+    const result = await pool.query(
+      `SELECT status AS label, COUNT(*)::integer AS count
+       FROM appointments
+       WHERE starts_at >= $1::date
+         AND starts_at < ($2::date + INTERVAL '1 day')
+         AND ($3::integer IS NULL OR staff_id = $3)
+       GROUP BY status
+       ORDER BY CASE status
+         WHEN 'Scheduled' THEN 1
+         WHEN 'Arrived' THEN 2
+         WHEN 'In Consultation' THEN 3
+         WHEN 'Completed' THEN 4
+         WHEN 'Cancelled' THEN 5
+       END`,
+      filters,
+    );
     res.json(result.rows);
   }),
 );

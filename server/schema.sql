@@ -54,6 +54,9 @@ CREATE TABLE appointments (
   ) WHERE (status <> 'Cancelled')
 );
 
+CREATE INDEX appointments_starts_at_idx ON appointments (starts_at);
+CREATE INDEX appointments_staff_starts_at_idx ON appointments (staff_id, starts_at);
+
 INSERT INTO patients (full_name, phone, date_of_birth) VALUES
   ('Maya Chen', '555-0101', '1992-04-14'),
   ('Omar Rivera', '555-0102', '1985-11-03'),

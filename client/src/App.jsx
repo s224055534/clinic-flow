@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { socket } from "./socket.js";
+
+const AnalyticsDashboard = lazy(() => import("./components/AnalyticsDashboard.jsx"));
 
 // Keep the demonstration fixed to one fictional clinic day
 const DEMO_DATE = "2026-09-16";
@@ -48,6 +50,7 @@ function describeAuditEvent(log) {
 export default function App() {
   // Hold the temporary dashboard data and form values in browser memory
   const [role, setRole] = useState("Receptionist");
+  const [activeView, setActiveView] = useState("schedule");
   const [date, setDate] = useState(DEMO_DATE);
   const [search, setSearch] = useState("");
   const [data, setData] = useState({
@@ -260,11 +263,29 @@ export default function App() {
         This learning prototype is not production authentication and must not
         contain real patient data.
       </p>
+      <nav className="view-switcher" aria-label="ClinicFlow sections">
+        <button
+          className={activeView === "schedule" ? "active" : ""}
+          aria-pressed={activeView === "schedule"}
+          onClick={() => setActiveView("schedule")}
+        >
+          Schedule
+        </button>
+        <button
+          className={activeView === "analytics" ? "active" : ""}
+          aria-pressed={activeView === "analytics"}
+          onClick={() => setActiveView("analytics")}
+        >
+          Analytics
+        </button>
+      </nav>
       {message && (
         <p className="message" aria-live="polite">
           {message}
         </p>
       )}
+      {activeView === "schedule" ? (
+        <>
       <section className="toolbar card">
         <label>
           Schedule date
@@ -638,6 +659,17 @@ export default function App() {
           {!patientMatches.length && <p>No matching fictional patients.</p>}
         </div>
       </section>
+        </>
+      ) : (
+        <Suspense fallback={<p className="message">Loading analytics dashboard…</p>}>
+          <AnalyticsDashboard
+            staff={data.staff}
+            role={role}
+            selectedDate={date}
+            refreshKey={refreshKey}
+          />
+        </Suspense>
+      )}
     </main>
   );
 }
