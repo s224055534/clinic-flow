@@ -31,7 +31,7 @@ jobs:
       - name: Install Dependencies
         run: npm install
 
-      - name: Run Tests
+      - name: Run Backend Tests
         run: npm test
 
   docker-build:
