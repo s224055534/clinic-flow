@@ -1,0 +1,20 @@
+services:
+  api:
+    build:
+      context: ./server
+    ports:
+      - "3000:3000"
+    environment:
+      PGUSER: postgres
+      PGPASSWORD: password
+      PGHOST: host.docker.internal
+      PGDATABASE: clinic_demo
+      PGPORT: 5432
+
+  client:
+    build:
+      context: ./client
+    ports:
+      - "5173:80"
+    depends_on:
+      - api
