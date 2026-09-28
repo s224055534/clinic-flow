@@ -6,9 +6,10 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --verbose"
+    "test": "node --test --test-concurrency=1"
   },
   "dependencies": {
+    "dotenv": "^18.0.4",
     "express": "5.2.1",
     "pg": "8.23.0",
     "socket.io": "^4.8.3"

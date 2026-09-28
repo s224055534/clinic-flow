@@ -1,17 +1,18 @@
+import 'dotenv/config';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { before, after, test } from 'node:test';
 import pg from 'pg';
 
 const { Pool } = pg;
-const database = process.env.TEST_PGDATABASE;
+const database = process.env.PGDATABASE;
 const skip = !database;
 const pool = database
   ? new Pool({
-      host: process.env.TEST_PGHOST ?? process.env.PGHOST,
-      port: Number(process.env.TEST_PGPORT ?? process.env.PGPORT ?? 5432),
-      user: process.env.TEST_PGUSER ?? process.env.PGUSER,
-      password: process.env.TEST_PGPASSWORD ?? process.env.PGPASSWORD,
+      host: process.env.PGHOST,
+      port: Number( process.env.PGPORT ?? 5432),
+      user: process.env.PGUSER,
+      password: process.env.PGPASSWORD,
       database,
     })
   : null;
