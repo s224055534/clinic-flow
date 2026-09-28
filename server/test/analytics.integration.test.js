@@ -1,10 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { loadEnvFile } from 'node:process';
 import { after, before, test } from 'node:test';
 import pg from 'pg';
-
-loadEnvFile();
 
 const { Pool } = pg;
 const database = process.env.TEST_PGDATABASE;
