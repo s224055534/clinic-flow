@@ -7,7 +7,10 @@ import cors from "cors";
 const { Pool } = pg;
 const app = express();
 app.use(cors({
-  origin: ["https://clinic-flow-1.onrender.com"],
+  origin: [
+    "http://localhost:5173",
+    "https://clinic-flow-1.onrender.com"
+  ],
   methods: ["GET", "POST", "PATCH"],
   credentials: true,
 }));
@@ -17,7 +20,9 @@ const pool = new Pool({
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
-    origin: ["https://clinic-flow-1.onrender.com"],
+    origin: [
+      "http://localhost:5173",
+      "https://clinic-flow-1.onrender.com"],
     methods: ["GET", "POST"],
     credentials: true,
   },

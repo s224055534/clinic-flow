@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { socket } from "./socket.js";
-const API_URL = import.meta.env.VITE_API_URL || "";
+const API_URL = import.meta.env.VITE_URL_API || "";
 
 const AnalyticsDashboard = lazy(() => import("./components/AnalyticsDashboard.jsx"));
 
