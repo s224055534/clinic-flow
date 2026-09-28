@@ -34,6 +34,18 @@ jobs:
       - name: Run Tests
         run: npm test
 
+  docker-build:
+    runs-on: ubuntu-latest
+  
+    steps:
+      - uses: actions/checkout@v4
+  
+      - name: Build Backend Docker Image
+        run: docker build -t clinicflow-api ./server
+  
+      - name: Build Frontend Docker Image
+        run: docker build -t clinicflow-client ./client
+
   frontend-build:
     runs-on: ubuntu-latest
 
